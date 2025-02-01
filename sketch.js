@@ -1,156 +1,126 @@
-const emotions = {
-    happy: {
-      keywords: ['高兴', '开心', '快乐', '幸福', '喜悦'],
-      color: [255, 215, 0], // 亮金色
-      count: 0
-    },
-    jealous: {
-      keywords: ['嫉妒', '羡慕', '眼红', '酸'],
-      color: [34, 139, 34], // 森林绿
-      count: 0
-    },
-    sad: {
-      keywords: ['悲伤', '难过', '伤心', '泪', '哭泣'],
-      color: [70, 130, 180], // 钢蓝色
-      count: 0
-    },
-    angry: {
-      keywords: ['生气', '愤怒', '发火', '恼火', '暴躁'],
-      color: [255, 0, 0], // 纯红色
-      count: 0
-    },
-    surprised: {
-      keywords: ['惊讶', '吃惊', '震惊', '意外'],
-      color: [147, 112, 219], // 紫罗兰色
-      count: 0
-    },
-    fearful: {
-      keywords: ['害怕', '恐惧', '惊恐', '恐慌'],
-      color: [25, 25, 112], // 午夜蓝
-      count: 0
-    },
-    anticipate: {
-      keywords: ['期待', '盼望', '等待', '憧憬'],
-      color: [255, 165, 0], // 橙色
-      count: 0
-    }
-};
+// camera object
+let mCamera;
 
-let inputText;
-let bubbles = [];
-let lastAnalysisTime = 0;
+// model object
+let mModel;
+
+// array to keep track of detected "things"
+let mDetected = [];
+
+// 添加一个数组来存储轨迹点
+let mTrailPoints = [];
+
+// 添加变量来存储轨迹点和控制绘制
+let lastDrawTime = 0;
+const DRAW_INTERVAL = 100;
+let currentX = 0;
+let currentY = 0;
+let stepX = 5;
+let stepY = 5;
+
+// start camera and create model
+function preload() {
+  mCamera = createCapture(VIDEO, { flipped: true });
+  mCamera.hide();
+
+  mModel = ml5.handPose();
+}
+
+// when some "thing" is detected, just copy it to mDetected
+function updateDetected(detected) {
+  mDetected = detected;
+  mModel.detect(mCamera, updateDetected);
+}
 
 function setup() {
+  // create p5js canvas
   createCanvas(windowWidth, windowHeight);
-  
-  // 创建输入控件
-  inputText = createInput('输入你的感受...');
-  inputText.size(300);
-  inputText.position(20, 20);
-  
-  const analyzeBtn = createButton('生成情绪气泡');
-  analyzeBtn.position(330, 20);
-  analyzeBtn.mousePressed(analyzeText);
-  
-  // 初始化气泡数组
-  initBubbles(100); // 预生成100个隐藏气泡
+
+  // 设置摄像头大小
+  mCamera.size(320, 240);
+
+  // run the model once on camera image
+  mModel.detect(mCamera, updateDetected);
 }
 
 function draw() {
-  background(25);
+  // 不再每帧清除背景
+  // 在左上角绘制缩小的摄像头画面
+  image(mCamera, 0, 0, 320, 240);
+
+  // 自动更新位置
+  currentX += stepX;
+  if (currentX > width || currentX < 0) {
+    stepX = -stepX;
+    currentY += 30; // 换行
+  }
   
-  // 更新并绘制气泡
-  bubbles.forEach(bubble => {
-    if (!bubble.active) return;
-    
-    // 浮动动画
-    bubble.y += bubble.speed;
-    if (bubble.y < -50) resetBubble(bubble);
-    
-    // 鼠标互动
-    const d = dist(mouseX, mouseY, bubble.x, bubble.y);
-    if (d < bubble.size/2) {
-      bubble.size *= 1.02;
-    }
-    
-    fill(...bubble.color, bubble.alpha);
-    noStroke();
-    ellipse(bubble.x, bubble.y, bubble.size);
-  });
-}
+  // 重置到顶部
+  if (currentY > height) {
+    currentY = 0;
+  }
 
-function analyzeText() {
-  if (millis() - lastAnalysisTime < 1000) return;
-  lastAnalysisTime = millis();
+  // 按时间间隔生成图案
+  if (millis() - lastDrawTime > DRAW_INTERVAL) {
+    drawRandomShape(currentX, currentY);
+    lastDrawTime = millis();
+  }
 
-  // 重置计数器
-  Object.values(emotions).forEach(e => e.count = 0);
-  const text = inputText.value();
-  let total = 0;
-
-  // ==== 修复1：正确统计情绪次数 ====
-  Object.entries(emotions).forEach(([key, e]) => {
-    let emotionCount = 0;
-    e.keywords.forEach(word => {
-      const regex = new RegExp(word, 'g');
-      const matches = text.match(regex) || [];
-      emotionCount += matches.length;
-    });
-    e.count = emotionCount;
-    total += emotionCount;
-  });
-
-  // ==== 修复2：正确分配气泡 ====
-  if (total > 0) {
-    // 重置气泡状态
-    bubbles.forEach(bubble => bubble.active = false);
-    
-    let activatedCount = 0;
-    
-    Object.entries(emotions).forEach(([key, e]) => {
-      const targetCount = Math.floor(bubbles.length * (e.count / total));
+  // 仍然保留手指控制的部分
+  for (let dObj of mDetected) {
+    const indexFinger = dObj.keypoints[8];
+    if (indexFinger) {
+      // 在摄像头画面中显示指示点
+      fill(0, 255, 0);
+      noStroke();
+      circle(indexFinger.x, indexFinger.y, 8);
       
-      for (let i = 0; i < bubbles.length && activatedCount < bubbles.length; i++) {
-        if (targetCount <= 0) break;
-        
-        if (!bubbles[i].active) {
-          Object.assign(bubbles[i], {
-            color: e.color,
-            size: random(10, 50),
-            alpha: random(100, 200),
-            speed: random(-0.5, -1.5),
-            active: true
-          });
-          resetBubble(bubbles[i]);
-          activatedCount++;
-          targetCount--;
-        }
-      }
-    });
+      // 将摄像头坐标映射到画布坐标用于生成图案
+      let mappedX = map(indexFinger.x, 0, mCamera.width, 0, width);
+      let mappedY = map(indexFinger.y, 0, mCamera.height, 0, height);
+      
+      // 使用映射后的位置
+      currentX = mappedX;
+      currentY = mappedY;
+    }
   }
 }
 
-function initBubbles(num) {
-  for (let i = 0; i < num; i++) {
-    bubbles.push({
-      x: 0,
-      y: 0,
-      size: 0,
-      color: [255],
-      alpha: 0,
-      speed: 0,
-      active: false
-    });
-  }
-}
-
-function resetBubble(bubble) {
-  bubble.x = random(width);
-  bubble.y = height + random(100);
-  bubble.alpha = random(100, 200);
-  bubble.speed = random(-0.5, -1.5);
-}
-
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
+function drawRandomShape(x, y) {
+  push();
+  
+  // 随机颜色和透明度
+  let rr = random(255);
+  let rg = random(255);
+  let rb = random(255);
+  let alpha = random(100, 255);
+  stroke(rr, rg, rb, alpha);
+  noFill();
+  
+  // 随机线条粗细
+  let strokeW = random(10);
+  strokeWeight(strokeW);
+  
+  // 随机旋转
+  translate(x, y);
+  angleMode(DEGREES);
+  let rotation = random(-15, 15);
+  rotate(rotation);
+  
+  // 随机形状大小
+  let shapeSize = random(10, 25);
+  
+  // 绘制矩形（带随机圆角）
+  rect(
+    0,
+    0,
+    shapeSize,
+    shapeSize,
+    random(0, 10),
+    random(0, 10),
+    random(0, 10),
+    random(0, 10)
+  );
+  
+  pop();
 }
